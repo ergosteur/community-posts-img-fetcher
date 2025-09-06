@@ -435,12 +435,17 @@ async function handleFetch() {
     text: meta.text || '',
     fetchedAt: nowISO
   };
-  const exists = history.find(h => h.url === newEntry.url);
-  if (!exists) {
+  // De-dup and move-to-top behavior
+  const idx = history.findIndex(h => h.url === newEntry.url);
+  if (idx >= 0) {
+    // Update existing entry and move it to the top
+    history.splice(idx, 1);
+    history.unshift(newEntry);
+  } else {
     history.unshift(newEntry);
     if (history.length > 50) history.pop();
-    saveHistory(history);
   }
+  saveHistory(history);
   renderHistory(history);
   return; // stop here; images render inside history panel
 }

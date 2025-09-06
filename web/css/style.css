@@ -62,3 +62,19 @@ label{display:flex;align-items:center;gap:8px;color:var(--muted)}
 
 /* Small visual tweak for generic pills */
 .pill:hover{border-color:#475569}
+
+/* History delete and clear styles */
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.history-delete {
+  margin-left: auto;
+}
+.history-delete:hover,
+#clearHistoryBtn:hover {
+  background: #7f1d1d;
+  border-color: #b91c1c;
+  color: #fecaca;
+}
