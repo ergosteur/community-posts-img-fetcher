@@ -515,6 +515,13 @@ historyBox.addEventListener('click', async (e) => {
     return;
   }
 
+  // clicking the image itself should open the lightbox
+  if (t.tagName === 'IMG' && t.closest('.thumb')) {
+    lightImg.src = t.src;
+    lightbox.style.display = 'flex';
+    return;
+  }
+
   // per-thumbnail lightbox open
   if (t.classList.contains('openBtn')) {
     const thumb = t.closest('.thumb');
