@@ -22,9 +22,45 @@ const SIZE_PARAM_RE = /(=s\d+|=w\d+(?:-h\d+)?(?:-no)?(?:-c[-\w\d]+)?)(?:-.*)?$/;
 let lastImages = [];
 
 function normalizeInputToUrl(s) {
-  s = s.trim();
-  if (!s) return "";
-  if (s.startsWith('http')) return s;
+  s = (s || '').trim();
+  if (!s) return '';
+
+  // If it's already an URL, try to parse and canonicalize
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      const host = u.hostname.toLowerCase();
+      // Accept common YouTube hosts
+      if (host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com') {
+        // Try to extract /post/{id}
+        const m = u.pathname.match(/\/post\/([^/?#]+)/i);
+        if (m && m[1]) {
+          const postId = m[1];
+          return `https://www.youtube.com/post/${postId}`;
+        }
+      }
+    } catch { /* fall through */ }
+    // Unknown URL shape — return as-is so proxy can try
+    return s;
+  }
+
+  // Bare ID heuristic: many community post IDs start with "Ug"
+  if (/^Ug[\w-]+$/i.test(s)) {
+    return `https://www.youtube.com/post/${s}`;
+  }
+
+  // Maybe user pasted something like "youtube.com/post/ID" without scheme
+  if (/^(?:www\.|m\.)?youtube\.com\//i.test(s)) {
+    try {
+      const u = new URL('https://' + s.replace(/^http:\/\//i, ''));
+      const m = u.pathname.match(/\/post\/([^/?#]+)/i);
+      if (m && m[1]) {
+        return `https://www.youtube.com/post/${m[1]}`;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Default: treat it as an ID and hope for the best
   return `https://www.youtube.com/post/${s}`;
 }
 
@@ -308,6 +344,7 @@ async function handleFetch() {
   results.innerHTML = '';
   metaCard.hidden = true;
   const input = normalizeInputToUrl(postInput.value);
+  postInput.value = input;
   if (!input) return setStatus('Enter a URL or post ID.', 'warn');
 
   setStatus('Fetching post HTML…');
