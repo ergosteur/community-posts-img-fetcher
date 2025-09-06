@@ -152,21 +152,79 @@ function findBackstageImages(ytdata) {
 // --- Video and Channel helpers ---
 function findVideoThumbnail(html) {
   try {
-    const m = html.match(/var ytInitialPlayerResponse = (\{.*?\});<\/script>/s);
-    if (m) {
-      const data = JSON.parse(m[1]);
-      const thumbs = data?.videoDetails?.thumbnail?.thumbnails || [];
-      if (thumbs.length) return [largestThumbUrl(thumbs)];
+    // Support both var and quoted assignment patterns for ytInitialPlayerResponse
+    const patterns = [
+      /var ytInitialPlayerResponse\s*=\s*(\{.+?\});/s,
+      /["']ytInitialPlayerResponse["']\s*=\s*(\{.+?\});/s,
+      /ytInitialPlayerResponse\s*=\s*(\{.+?\});/s,
+    ];
+    let json = null;
+    for (const pat of patterns) {
+      const m = html.match(pat);
+      if (m) {
+        json = m[1];
+        break;
+      }
     }
-  } catch (e) { console.error(e); }
-  return [];
+    if (!json) return [];
+    // Strip trailing semicolon if present
+    json = json.replace(/;$/, '').trim();
+    let data;
+    try {
+      data = JSON.parse(json);
+    } catch (e) {
+      console.error('findVideoThumbnail JSON parse error:', e);
+      return [];
+    }
+    const thumbs = (data && data.videoDetails && data.videoDetails.thumbnail && Array.isArray(data.videoDetails.thumbnail.thumbnails))
+      ? data.videoDetails.thumbnail.thumbnails : [];
+    if (!thumbs.length) return [];
+    // Sort thumbnails by resolution (width*height) descending
+    const sorted = [...thumbs].sort((a, b) => (b.width * b.height) - (a.width * a.height));
+    // Return the highest-res thumbnail
+    return [toS0(sorted[0].url)];
+  } catch (e) {
+    console.error('findVideoThumbnail error:', e);
+    return [];
+  }
 }
 
-function findChannelAssets(ytdata) {
-  const header = ytdata.header?.c4TabbedHeaderRenderer;
-  if (!header) return {};
-  const avatar = largestThumbUrl(header.avatar?.thumbnails || []);
-  const banner = largestThumbUrl(header.banner?.thumbnails || []);
+function findChannelAssets(ytdata, html) {
+  // Try new layout: pageHeaderViewModel
+  let avatar = null, banner = null;
+  const headerModel = ytdata.pageHeaderViewModel;
+  if (headerModel) {
+    // Try to extract avatar and banner from pageHeaderViewModel
+    // Avatar: pageHeaderViewModel.avatar.images (array of {url})
+    if (Array.isArray(headerModel.avatar?.images) && headerModel.avatar.images.length) {
+      avatar = largestThumbUrl(headerModel.avatar.images.map(img => ({ url: img.url, width: img.width || 0, height: img.height || 0 })));
+    }
+    // Banner: pageHeaderViewModel.banner.images (array of {url})
+    if (Array.isArray(headerModel.banner?.images) && headerModel.banner.images.length) {
+      banner = largestThumbUrl(headerModel.banner.images.map(img => ({ url: img.url, width: img.width || 0, height: img.height || 0 })));
+    }
+  }
+  // Fallback: legacy layout c4TabbedHeaderRenderer
+  if (!avatar || !banner) {
+    const header = ytdata.header?.c4TabbedHeaderRenderer;
+    if (header) {
+      if (!avatar) avatar = largestThumbUrl(header.avatar?.thumbnails || []);
+      if (!banner) banner = largestThumbUrl(header.banner?.thumbnails || []);
+    }
+  }
+  // Fallback: scrape from HTML if still missing
+  if ((!avatar || !banner) && typeof html === 'string') {
+    // Try to find avatar <img> with id="avatar" or class containing "avatar"
+    if (!avatar) {
+      const m = html.match(/<img[^>]+(?:id=["']avatar["']|class=["'][^"']*avatar[^"']*)[^>]+src=["']([^"']+)["']/i);
+      if (m && m[1]) avatar = m[1];
+    }
+    // Try to find banner <img> with id="banner" or class containing "banner"
+    if (!banner) {
+      const m = html.match(/<img[^>]+(?:id=["']banner["']|class=["'][^"']*banner[^"']*)[^>]+src=["']([^"']+)["']/i);
+      if (m && m[1]) banner = m[1];
+    }
+  }
   return { avatar, banner };
 }
 
@@ -398,7 +456,7 @@ async function loadAndRenderEntry(entry, contentEl) {
   // Channel page
   if (/\/channel\//.test(entry.url) || /\/(@[^/]+)/.test(entry.url)) {
     const data = extractInitialData(html);
-    const assets = findChannelAssets(data);
+    const assets = findChannelAssets(data, html);
     const prefix = 'channel';
     const urls = [assets.avatar, assets.banner].filter(Boolean);
     if (!urls.length) {
@@ -485,7 +543,7 @@ async function handleFetch() {
     imgs = thumbs;
     setStatus('Found video thumbnail.', 'ok');
   } else if (/\/channel\//.test(input) || /\/(@[^/]+)/.test(input)) {
-    const assets = findChannelAssets(data);
+    const assets = findChannelAssets(data, html);
     imgs = [assets.avatar, assets.banner].filter(Boolean);
     prefix = 'channel';
     setStatus(`Found ${imgs.length} channel asset(s).`, 'ok');
