@@ -277,15 +277,37 @@ function loadHistory() {
   }
 }
 
+function deleteHistoryIndex(idx) {
+  const hist = loadHistory();
+  if (idx < 0 || idx >= hist.length) return hist;
+  hist.splice(idx, 1);
+  saveHistory(hist);
+  return hist;
+}
+
 function renderHistory(history) {
   historyBox.innerHTML = '';
   if (!history.length) {
     historyBox.innerHTML = '<h3>History</h3><p class="small">No history yet.</p>';
     return;
   }
+  const headerBar = document.createElement('div');
+  headerBar.style.display = 'flex';
+  headerBar.style.justifyContent = 'space-between';
+  headerBar.style.alignItems = 'center';
+
   const header = document.createElement('h3');
   header.textContent = 'History';
-  historyBox.appendChild(header);
+  headerBar.appendChild(header);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'pill';
+  clearBtn.id = 'clearHistoryBtn';
+  clearBtn.type = 'button';
+  clearBtn.textContent = 'Clear History';
+  headerBar.appendChild(clearBtn);
+
+  historyBox.appendChild(headerBar);
 
   history.forEach((item, idx) => {
     const wrap = document.createElement('div');
@@ -297,12 +319,26 @@ function renderHistory(history) {
     pill.dataset.index = String(idx);
     pill.textContent = `[${item.date}] ${item.channel} (${item.postId})`;
 
+    const del = document.createElement('button');
+    del.className = 'pill history-delete';
+    del.type = 'button';
+    del.dataset.index = String(idx);
+    del.title = 'Remove from history';
+    del.textContent = '×';
+
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
+    row.style.alignItems = 'center';
+    row.appendChild(pill);
+    row.appendChild(del);
+
     const content = document.createElement('div');
     content.className = 'history-content';
     content.style.display = idx === 0 ? 'block' : 'none';
     if (idx === 0) content.innerHTML = '<div class="small">Loading…</div>';
 
-    wrap.appendChild(pill);
+    wrap.appendChild(row);
     wrap.appendChild(content);
     historyBox.appendChild(wrap);
 
@@ -414,6 +450,33 @@ postInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleFetch(
 
 historyBox.addEventListener('click', async (e) => {
   const t = e.target;
+
+  // Clear entire history
+  if (t.id === 'clearHistoryBtn') {
+    const hist = loadHistory();
+    if (!hist.length) return;
+    if (confirm('Clear all history? This will remove all saved posts from this device.')) {
+      saveHistory([]);
+      renderHistory([]);
+      setStatus('History cleared.', 'ok');
+    }
+    return;
+  }
+
+  if (t.classList.contains('history-delete')) {
+    e.stopPropagation(); // don’t toggle accordion
+    const idx = Number(t.dataset.index || '-1');
+    const hist = loadHistory();
+    const item = hist[idx];
+    if (!item) return;
+    const label = `[${item.date}] ${item.channel} (${item.postId})`;
+    if (confirm(`Remove this entry?\n\n${label}`)) {
+      const updated = deleteHistoryIndex(idx);
+      renderHistory(updated);
+      setStatus('Entry removed from history.', 'ok');
+    }
+    return;
+  }
 
   // toggle expand/collapse
   if (t.classList.contains('history-toggle')) {
