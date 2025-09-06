@@ -239,12 +239,25 @@ function cardFor(url, fnameBase, idx) {
   el.innerHTML = `
         <img loading="lazy" src="${url}" alt="img ${idx}">
         <div class="meta">
-          <div class="small">${fname}</div>
+          <div class="small">
+            ${fname}
+            <span class="res" title="Resolution">(…)</span>
+          </div>
           <div class="row" style="margin-top:6px">
             <button class="pill downloadBtn" type="button" data-url="${url}" data-name="${fname}">Download</button>
             <button class="pill openBtn" type="button">Open</button>
+            <button class="pill openTabBtn" type="button" data-url="${url}">Open Tab</button>
           </div>
         </div>`;
+  // After setting innerHTML, add JS to show resolution
+  const imgEl = el.querySelector('img');
+  const resEl = el.querySelector('.res');
+  imgEl.addEventListener('load', () => {
+    if (resEl) resEl.textContent = `${imgEl.naturalWidth}×${imgEl.naturalHeight}`;
+  });
+  imgEl.addEventListener('error', () => {
+    if (resEl) resEl.textContent = '';
+  });
   return el;
 }
 
@@ -424,6 +437,13 @@ historyBox.addEventListener('click', async (e) => {
         content.innerHTML = `<div class="small">Failed to load: ${err.message}</div>`;
       }
     }
+    return;
+  }
+
+  // per-thumbnail open in new tab
+  if (t.classList.contains('openTabBtn')) {
+    const url = t.getAttribute('data-url');
+    if (url) window.open(url, '_blank');
     return;
   }
 
