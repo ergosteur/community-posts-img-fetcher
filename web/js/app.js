@@ -149,6 +149,27 @@ function findBackstageImages(ytdata) {
   return out;
 }
 
+// --- Video and Channel helpers ---
+function findVideoThumbnail(html) {
+  try {
+    const m = html.match(/var ytInitialPlayerResponse = (\{.*?\});<\/script>/s);
+    if (m) {
+      const data = JSON.parse(m[1]);
+      const thumbs = data?.videoDetails?.thumbnail?.thumbnails || [];
+      if (thumbs.length) return [largestThumbUrl(thumbs)];
+    }
+  } catch (e) { console.error(e); }
+  return [];
+}
+
+function findChannelAssets(ytdata) {
+  const header = ytdata.header?.c4TabbedHeaderRenderer;
+  if (!header) return {};
+  const avatar = largestThumbUrl(header.avatar?.thumbnails || []);
+  const banner = largestThumbUrl(header.banner?.thumbnails || []);
+  return { avatar, banner };
+}
+
 function extractChannelFromTitle(html) {
   const m = html.match(/<title>(.*?)<\/title>/si);
   if (!m) return null;
@@ -357,6 +378,42 @@ function renderHistory(history) {
 
 async function loadAndRenderEntry(entry, contentEl) {
   const html = await fetchHtml(entry.url);
+  // Video page
+  if (/watch\?v=/.test(entry.url)) {
+    const thumbs = findVideoThumbnail(html);
+    if (!thumbs.length) {
+      contentEl.innerHTML = '<div class="small">No video thumbnail found.</div>';
+      return;
+    }
+    const vidId = new URL(entry.url).searchParams.get('v');
+    const prefix = `video_${sanitizeFilename(vidId)}`;
+    lastImages = thumbs.map((url,i)=>({url, name:`${prefix}_img${String(i+1).padStart(2,'0')}.jpg`, prefix}));
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    thumbs.forEach((u,i)=>grid.appendChild(cardFor(u,prefix,i+1)));
+    contentEl.innerHTML = `<div class="card" style="margin-top:10px"><div class="small">Video ID: ${vidId}</div></div>`;
+    contentEl.appendChild(grid);
+    return;
+  }
+  // Channel page
+  if (/\/channel\//.test(entry.url) || /\/(@[^/]+)/.test(entry.url)) {
+    const data = extractInitialData(html);
+    const assets = findChannelAssets(data);
+    const prefix = 'channel';
+    const urls = [assets.avatar, assets.banner].filter(Boolean);
+    if (!urls.length) {
+      contentEl.innerHTML = '<div class="small">No channel assets found.</div>';
+      return;
+    }
+    lastImages = urls.map((url,i)=>({url, name:`${prefix}_img${String(i+1).padStart(2,'0')}.jpg`, prefix}));
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    urls.forEach((u,i)=>grid.appendChild(cardFor(u,prefix,i+1)));
+    contentEl.innerHTML = `<div class="card" style="margin-top:10px"><div class="small">Channel assets</div></div>`;
+    contentEl.appendChild(grid);
+    return;
+  }
+  // Post page (default)
   const data = extractInitialData(html);
   const meta = extractPostMeta(data, html);
   const imgs = findBackstageImages(data);
@@ -364,11 +421,8 @@ async function loadAndRenderEntry(entry, contentEl) {
     contentEl.innerHTML = '<div class="small">No images found.</div>';
     return;
   }
-
   const prefix = buildFilenamePrefix(meta);
   const hires = imgs.map(b => largestThumbUrl(b.thumbnails)).filter(Boolean);
-
-  // refresh the global lastImages for ZIP / Open All
   lastImages = hires.map((url, i) => {
     const idxStr = String(i + 1).padStart(2, '0');
     const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
@@ -376,18 +430,15 @@ async function loadAndRenderEntry(entry, contentEl) {
     const name = `${prefix}_img${idxStr}.${safeExt}`;
     return { url, name, prefix };
   });
-
   const metaHtml = `
     <div class="card" style="margin-top:10px">
       <div class="small">Channel: ${meta.channel || '(unknown)'} | Date: ${meta.date_iso || meta.date_raw || 'unknown'} | Post: ${meta.postId || '(unknown)'} </div>
       ${meta.text ? `<div class="small" style="margin-top:6px">“${meta.text}”</div>` : ''}
     </div>
   `;
-
   const grid = document.createElement('div');
   grid.className = 'grid';
   hires.forEach((u, i) => grid.appendChild(cardFor(u, prefix, i + 1)));
-
   contentEl.innerHTML = metaHtml;
   contentEl.appendChild(grid);
 }
@@ -416,26 +467,50 @@ async function handleFetch() {
     return setStatus('Could not locate ytInitialData in the page.', 'err');
   }
 
-  const meta = extractPostMeta(data, html);
-  renderMeta(meta);
+  let imgs = [];
+  let prefix = '';
+  let meta = null;
 
-  const imgs = findBackstageImages(data);
-  if (!imgs.length) return setStatus('No images found in this post.', 'warn');
+  if (/\/post\//.test(input)) {
+    meta = extractPostMeta(data, html);
+    renderMeta(meta);
+    imgs = findBackstageImages(data).map(b => largestThumbUrl(b.thumbnails)).filter(Boolean);
+    prefix = buildFilenamePrefix(meta);
+    setStatus(`Found ${imgs.length} image(s) in post.`, 'ok');
+  } else if (/watch\?v=/.test(input)) {
+    const thumbs = findVideoThumbnail(html);
+    if (!thumbs.length) return setStatus('No video thumbnail found.', 'warn');
+    const vidId = new URL(input).searchParams.get('v');
+    prefix = `video_${sanitizeFilename(vidId)}`;
+    imgs = thumbs;
+    setStatus('Found video thumbnail.', 'ok');
+  } else if (/\/channel\//.test(input) || /\/(@[^/]+)/.test(input)) {
+    const assets = findChannelAssets(data);
+    imgs = [assets.avatar, assets.banner].filter(Boolean);
+    prefix = 'channel';
+    setStatus(`Found ${imgs.length} channel asset(s).`, 'ok');
+  } else {
+    return setStatus('Unsupported URL type.', 'warn');
+  }
 
-  const prefix = buildFilenamePrefix(meta);
-  const hires = imgs.map(b => largestThumbUrl(b.thumbnails)).filter(Boolean);
-
-  setStatus(`Found ${hires.length} image(s).`, 'ok');
+  // Build lastImages for ZIP/openAll
+  lastImages = imgs.map((url, i) => {
+    const idxStr = String(i + 1).padStart(2, '0');
+    const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
+    const safeExt = /^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
+    const name = `${prefix}_img${idxStr}.${safeExt}`;
+    return { url, name, prefix };
+  });
 
   // Save to history and re-render the accordion (top item auto-loads)
   const history = loadHistory();
   const nowISO = new Date().toISOString();
   const newEntry = {
     url: input,
-    channel: meta.channel || '(unknown)',
-    postId: meta.postId || '(unknown)',
-    date: meta.date_iso || meta.date_raw || '(unknown)',
-    text: meta.text || '',
+    channel: meta && meta.channel ? meta.channel : '(unknown)',
+    postId: meta && meta.postId ? meta.postId : '(unknown)',
+    date: meta && (meta.date_iso || meta.date_raw) ? (meta.date_iso || meta.date_raw) : '(unknown)',
+    text: meta && meta.text ? meta.text : '',
     fetchedAt: nowISO
   };
   // De-dup and move-to-top behavior
