@@ -2,7 +2,8 @@
 const $ = sel => document.querySelector(sel);
 const postInput = $('#postInput');
 const goBtn = $('#goBtn');
-const saveAllBtn = $('#saveAllBtn');
+const zipBtn = $('#zipBtn');
+const openAllBtn = $('#openAllBtn');
 const statusEl = $('#status');
 const useProxy = $('#useProxy');
 const proxyUrl = $('#proxyUrl');
@@ -12,8 +13,13 @@ const datePill = $('#datePill');
 const postPill = $('#postPill');
 const textSnippet = $('#textSnippet');
 const results = $('#results');
+const historyBox = $('#historyBox');
+const lightbox = $('#lightbox');
+const lightImg = $('#lightImg');
 
 const SIZE_PARAM_RE = /(=s\d+|=w\d+(?:-h\d+)?(?:-no)?(?:-c[-\w\d]+)?)(?:-.*)?$/;
+
+let lastImages = [];
 
 function normalizeInputToUrl(s) {
   s = s.trim();
@@ -187,18 +193,59 @@ function buildFilenamePrefix(meta) {
 }
 
 function cardFor(url, fnameBase, idx) {
+  const idxStr = String(idx).padStart(2, '0');
+  const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
+  const safeExt = /^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
+  const fname = `${fnameBase}_img${idxStr}.${safeExt}`;
+
   const el = document.createElement('div');
   el.className = 'thumb';
   el.innerHTML = `
         <img loading="lazy" src="${url}" alt="img ${idx}">
         <div class="meta">
-          <div class="small">${fnameBase}_img${String(idx).padStart(2, '0')}</div>
+          <div class="small">${fname}</div>
           <div class="row" style="margin-top:6px">
-            <a href="${url}" download class="pill">Download</a>
-            <a href="${url}" target="_blank" rel="noreferrer" class="pill">Open</a>
+            <a href="${url}" download="${fname}" class="pill">Download</a>
+            <button class="pill openBtn" type="button">Open</button>
           </div>
         </div>`;
   return el;
+}
+
+function saveHistory(history) {
+  try {
+    localStorage.setItem('ytPostHistory', JSON.stringify(history));
+  } catch { }
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem('ytPostHistory');
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function renderHistory(history) {
+  historyBox.innerHTML = '';
+  if (!history.length) {
+    historyBox.textContent = 'No history yet.';
+    return;
+  }
+  history.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    div.textContent = `${item.date} - ${item.channel} - ${item.postId}`;
+    div.title = item.text || '';
+    div.style.cursor = 'pointer';
+    div.onclick = () => {
+      postInput.value = item.url;
+      handleFetch();
+    };
+    historyBox.appendChild(div);
+  });
 }
 
 async function handleFetch() {
@@ -237,36 +284,99 @@ async function handleFetch() {
   hires.forEach((u, i) => results.appendChild(cardFor(u, prefix, i + 1)));
   setStatus(`Found ${hires.length} image(s).`, 'ok');
 
-  // Hook up "Download All"
-  saveAllBtn.onclick = async () => {
-    if (!hires.length) return;
-    try {
-      // Try File System Access API for a nicer UX (Chromium/Edge/Android)
-      if ('showDirectoryPicker' in window) {
-        const dir = await window.showDirectoryPicker({ id: 'yt-community-images' });
-        await Promise.all(hires.map(async (u, i) => {
-          const idx = String(i + 1).padStart(2, '0');
-          const ext = (new URL(u).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
-          const fname = `${prefix}_img${idx}.${/^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg'}`;
-          const f = await dir.getFileHandle(fname, { create: true });
-          const w = await f.createWritable();
-          const res = await fetch(u);
-          await w.write(await res.blob());
-          await w.close();
-        }));
-      } else {
-        // Fallback: open all in new tabs; user can save (robust cross-browser fallback)
-        hires.forEach(u => window.open(u, '_blank'));
-      }
-    } catch (e) {
-      console.error(e);
-      setStatus(`Download-all failed: ${e.message}`, 'err');
-    }
+  lastImages = hires.map((url, i) => {
+    const idxStr = String(i + 1).padStart(2, '0');
+    const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
+    const safeExt = /^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
+    const name = `${prefix}_img${idxStr}.${safeExt}`;
+    return { url, name, prefix };
+  });
+
+  // Save to history
+  const history = loadHistory();
+  const nowISO = new Date().toISOString();
+  const newEntry = {
+    url: input,
+    channel: meta.channel || '(unknown)',
+    postId: meta.postId || '(unknown)',
+    date: meta.date_iso || meta.date_raw || '(unknown)',
+    text: meta.text || '',
+    fetchedAt: nowISO
   };
+  // Avoid duplicates (by url)
+  const exists = history.find(h => h.url === newEntry.url);
+  if (!exists) {
+    history.unshift(newEntry);
+    if (history.length > 50) history.pop();
+    saveHistory(history);
+  }
+  renderHistory(history);
 }
 
 goBtn.onclick = handleFetch;
 postInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleFetch(); });
+
+results.addEventListener('click', e => {
+  if (e.target.classList.contains('openBtn')) {
+    const thumb = e.target.closest('.thumb');
+    if (!thumb) return;
+    const img = thumb.querySelector('img');
+    if (!img) return;
+    lightImg.src = img.src;
+    lightbox.style.display = 'flex';
+  }
+});
+
+lightbox.addEventListener('click', e => {
+  if (e.target === lightbox) {
+    lightbox.style.display = 'none';
+    lightImg.src = '';
+  }
+});
+
+zipBtn.onclick = async () => {
+  if (!lastImages.length) {
+    setStatus('No images to zip.', 'warn');
+    return;
+  }
+  setStatus('Preparing ZIP archive...');
+  try {
+    const JSZip = window.JSZip;
+    const zip = new JSZip();
+    await Promise.all(lastImages.map(async img => {
+      const res = await fetch(img.url);
+      const blob = await res.blob();
+      zip.file(img.name, blob);
+    }));
+    const content = await zip.generateAsync({ type: 'blob' });
+    const saveAs = window.saveAs;
+    if (saveAs) {
+      saveAs(content, `${lastImages[0].prefix}_images.zip`);
+      setStatus('ZIP file ready.', 'ok');
+    } else {
+      setStatus('FileSaver.js is required for ZIP download.', 'err');
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus(`ZIP creation failed: ${e.message}`, 'err');
+  }
+};
+
+openAllBtn.onclick = () => {
+  if (!lastImages.length) {
+    setStatus('No images to open.', 'warn');
+    return;
+  }
+  let opened = 0;
+  lastImages.forEach(img => {
+    const w = window.open(img.url, '_blank');
+    if (w) opened++;
+  });
+  if (opened < lastImages.length) {
+    alert('Some tabs were blocked by your browser popup blocker. Please allow popups for this site.');
+  }
+  setStatus(`Opened ${opened} image(s) in new tabs.`, 'ok');
+};
 
 // PWA registration
 if ('serviceWorker' in navigator) {
