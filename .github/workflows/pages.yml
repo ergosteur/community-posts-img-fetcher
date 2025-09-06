@@ -1,17 +1,39 @@
+# .github/workflows/pages.yml
 name: Deploy web to Pages
 on:
   push:
     branches: [ main ]
     paths: [ 'web/**', '.github/workflows/pages.yml' ]
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: web }
-      - uses: actions/deploy-pages@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+          name: web-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: web-pages
