@@ -1,0 +1,9 @@
+name = "ytc-img-proxy"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+# (optionally) bind to a custom route
+# routes = [{ pattern = "proxy.example.com/fetch", custom_domain = true }]
+
+# set via GitHub Actions secrets or local wrangler config:
+# account_id = "your-cloudflare-account-id"

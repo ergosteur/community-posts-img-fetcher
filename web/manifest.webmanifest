@@ -1,0 +1,13 @@
+{
+  "name": "YT Community Image Saver",
+  "short_name": "YT Img Saver",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#111827",
+  "description": "Fetch and download high-res images from YouTube Community posts.",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
