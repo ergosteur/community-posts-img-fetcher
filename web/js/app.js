@@ -205,7 +205,7 @@ function cardFor(url, fnameBase, idx) {
         <div class="meta">
           <div class="small">${fname}</div>
           <div class="row" style="margin-top:6px">
-            <a href="${url}" download="${fname}" class="pill">Download</a>
+            <button class="pill downloadBtn" type="button" data-url="${url}" data-name="${fname}">Download</button>
             <button class="pill openBtn" type="button">Open</button>
           </div>
         </div>`;
@@ -231,21 +231,77 @@ function loadHistory() {
 function renderHistory(history) {
   historyBox.innerHTML = '';
   if (!history.length) {
-    historyBox.textContent = 'No history yet.';
+    historyBox.innerHTML = '<h3>History</h3><p class="small">No history yet.</p>';
     return;
   }
-  history.forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'history-item';
-    div.textContent = `${item.date} - ${item.channel} - ${item.postId}`;
-    div.title = item.text || '';
-    div.style.cursor = 'pointer';
-    div.onclick = () => {
-      postInput.value = item.url;
-      handleFetch();
-    };
-    historyBox.appendChild(div);
+  const header = document.createElement('h3');
+  header.textContent = 'History';
+  historyBox.appendChild(header);
+
+  history.forEach((item, idx) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'history-item';
+
+    const pill = document.createElement('button');
+    pill.className = 'pill history-toggle';
+    pill.type = 'button';
+    pill.dataset.index = String(idx);
+    pill.textContent = `[${item.date}] ${item.channel} (${item.postId})`;
+
+    const content = document.createElement('div');
+    content.className = 'history-content';
+    content.style.display = idx === 0 ? 'block' : 'none';
+    if (idx === 0) content.innerHTML = '<div class="small">Loading…</div>';
+
+    wrap.appendChild(pill);
+    wrap.appendChild(content);
+    historyBox.appendChild(wrap);
+
+    // Auto-load newest entry
+    if (idx === 0) {
+      loadAndRenderEntry(item, content).catch(err => {
+        console.error(err);
+        content.innerHTML = `<div class="small">Failed to load: ${err.message}</div>`;
+      });
+    }
   });
+}
+
+async function loadAndRenderEntry(entry, contentEl) {
+  const html = await fetchHtml(entry.url);
+  const data = extractInitialData(html);
+  const meta = extractPostMeta(data, html);
+  const imgs = findBackstageImages(data);
+  if (!imgs.length) {
+    contentEl.innerHTML = '<div class="small">No images found.</div>';
+    return;
+  }
+
+  const prefix = buildFilenamePrefix(meta);
+  const hires = imgs.map(b => largestThumbUrl(b.thumbnails)).filter(Boolean);
+
+  // refresh the global lastImages for ZIP / Open All
+  lastImages = hires.map((url, i) => {
+    const idxStr = String(i + 1).padStart(2, '0');
+    const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
+    const safeExt = /^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
+    const name = `${prefix}_img${idxStr}.${safeExt}`;
+    return { url, name, prefix };
+  });
+
+  const metaHtml = `
+    <div class="card" style="margin-top:10px">
+      <div class="small">Channel: ${meta.channel || '(unknown)'} | Date: ${meta.date_iso || meta.date_raw || 'unknown'} | Post: ${meta.postId || '(unknown)'} </div>
+      ${meta.text ? `<div class="small" style="margin-top:6px">“${meta.text}”</div>` : ''}
+    </div>
+  `;
+
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  hires.forEach((u, i) => grid.appendChild(cardFor(u, prefix, i + 1)));
+
+  contentEl.innerHTML = metaHtml;
+  contentEl.appendChild(grid);
 }
 
 async function handleFetch() {
@@ -280,19 +336,9 @@ async function handleFetch() {
   const prefix = buildFilenamePrefix(meta);
   const hires = imgs.map(b => largestThumbUrl(b.thumbnails)).filter(Boolean);
 
-  results.innerHTML = '';
-  hires.forEach((u, i) => results.appendChild(cardFor(u, prefix, i + 1)));
   setStatus(`Found ${hires.length} image(s).`, 'ok');
 
-  lastImages = hires.map((url, i) => {
-    const idxStr = String(i + 1).padStart(2, '0');
-    const ext = (new URL(url).pathname.split('.').pop() || 'jpg').split('?')[0].slice(0, 5);
-    const safeExt = /^[A-Za-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
-    const name = `${prefix}_img${idxStr}.${safeExt}`;
-    return { url, name, prefix };
-  });
-
-  // Save to history
+  // Save to history and re-render the accordion (top item auto-loads)
   const history = loadHistory();
   const nowISO = new Date().toISOString();
   const newEntry = {
@@ -303,7 +349,6 @@ async function handleFetch() {
     text: meta.text || '',
     fetchedAt: nowISO
   };
-  // Avoid duplicates (by url)
   const exists = history.find(h => h.url === newEntry.url);
   if (!exists) {
     history.unshift(newEntry);
@@ -311,19 +356,70 @@ async function handleFetch() {
     saveHistory(history);
   }
   renderHistory(history);
+  return; // stop here; images render inside history panel
 }
 
 goBtn.onclick = handleFetch;
 postInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleFetch(); });
 
-results.addEventListener('click', e => {
-  if (e.target.classList.contains('openBtn')) {
-    const thumb = e.target.closest('.thumb');
-    if (!thumb) return;
-    const img = thumb.querySelector('img');
-    if (!img) return;
-    lightImg.src = img.src;
-    lightbox.style.display = 'flex';
+historyBox.addEventListener('click', async (e) => {
+  const t = e.target;
+
+  // toggle expand/collapse
+  if (t.classList.contains('history-toggle')) {
+    const item = t.closest('.history-item');
+    const content = item.querySelector('.history-content');
+    const isHidden = content.style.display === 'none';
+    // collapse others
+    historyBox.querySelectorAll('.history-content').forEach(el => el.style.display = 'none');
+    content.style.display = isHidden ? 'block' : 'none';
+
+    if (isHidden && !content.dataset.loaded) {
+      content.innerHTML = '<div class="small">Loading…</div>';
+      const idx = Number(t.dataset.index || '0');
+      const hist = loadHistory();
+      const entry = hist[idx];
+      try {
+        await loadAndRenderEntry(entry, content);
+        content.dataset.loaded = '1';
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = `<div class="small">Failed to load: ${err.message}</div>`;
+      }
+    }
+    return;
+  }
+
+  // per-thumbnail lightbox open
+  if (t.classList.contains('openBtn')) {
+    const thumb = t.closest('.thumb');
+    const img = thumb && thumb.querySelector('img');
+    if (img) {
+      lightImg.src = img.src;
+      lightbox.style.display = 'flex';
+    }
+    return;
+  }
+
+  // per-thumbnail download via FileSaver
+  if (t.classList.contains('downloadBtn')) {
+    e.preventDefault();
+    const url = t.getAttribute('data-url');
+    const name = t.getAttribute('data-name');
+    if (!url || !name) return;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      if (window.saveAs) {
+        window.saveAs(blob, name);
+        setStatus(`Downloaded ${name}`, 'ok');
+      } else {
+        setStatus('FileSaver.js is required for download.', 'err');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus(`Download failed: ${err.message}`, 'err');
+    }
   }
 });
 
@@ -382,3 +478,5 @@ openAllBtn.onclick = () => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(console.error);
 }
+
+renderHistory(loadHistory());
