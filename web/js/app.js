@@ -16,6 +16,7 @@ const results = $('#results');
 const historyBox = $('#history');
 const lightbox = $('#lightbox');
 const lightImg = document.querySelector('#lightbox img');
+const lightboxClose = document.getElementById('lightboxClose');
 
 const SIZE_PARAM_RE = /(=s\d+|=w\d+(?:-h\d+)?(?:-no)?(?:-c[-\w\d]+)?)(?:-.*)?$/;
 
@@ -344,10 +345,12 @@ function renderHistory(history) {
 
     // Auto-load newest entry
     if (idx === 0) {
-      loadAndRenderEntry(item, content).catch(err => {
-        console.error(err);
-        content.innerHTML = `<div class="small">Failed to load: ${err.message}</div>`;
-      });
+      loadAndRenderEntry(item, content)
+        .then(() => { content.dataset.loaded = '1'; })
+        .catch(err => {
+          console.error(err);
+          content.innerHTML = `<div class="small">Failed to load: ${err.message}</div>`;
+        });
     }
   });
 }
@@ -557,6 +560,21 @@ historyBox.addEventListener('click', async (e) => {
 
 lightbox.addEventListener('click', e => {
   if (e.target === lightbox) {
+    lightbox.style.display = 'none';
+    lightImg.src = '';
+  }
+});
+
+if (lightboxClose) {
+  lightboxClose.addEventListener('click', () => {
+    lightbox.style.display = 'none';
+    lightImg.src = '';
+  });
+}
+
+// close with Escape
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && lightbox.style.display === 'flex') {
     lightbox.style.display = 'none';
     lightImg.src = '';
   }
