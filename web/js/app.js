@@ -13,9 +13,9 @@ const datePill = $('#datePill');
 const postPill = $('#postPill');
 const textSnippet = $('#textSnippet');
 const results = $('#results');
-const historyBox = $('#historyBox');
+const historyBox = $('#history');
 const lightbox = $('#lightbox');
-const lightImg = $('#lightImg');
+const lightImg = document.querySelector('#lightbox img');
 
 const SIZE_PARAM_RE = /(=s\d+|=w\d+(?:-h\d+)?(?:-no)?(?:-c[-\w\d]+)?)(?:-.*)?$/;
 
